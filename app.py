@@ -1,12 +1,12 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
+from io import BytesIO
 
 st.set_page_config(page_title='Turnera Kinesiología', layout='wide')
 st.title('Turnera Kinesiología 🩷')
 st.caption('Turnos de lunes a sábado (semana actual + siguiente). Intervalos de 30 minutos.')
 
-# Inicializar turnos en memoria
 if 'turnos' not in st.session_state:
     st.session_state.turnos = []
 
@@ -38,15 +38,13 @@ with st.form("form_turno"):
         st.success("✅ Turno guardado")
 
 st.markdown("---")
-st.subheader("📅 Agenda de turnos (una sola tabla con días y horarios)")
+st.subheader("📅 Agenda de turnos (una sola tabla)")
 
-# Generar días lunes a sábado para semana actual + siguiente
 def generar_dias():
     hoy = datetime.today()
     lunes = hoy - timedelta(days=hoy.weekday())
-    return [lunes + timedelta(days=i) for i in range(12)]  # lunes a sábado * 2 semanas
+    return [lunes + timedelta(days=i) for i in range(12)]
 
-# Generar horarios desde 07:00 a 21:00 en intervalos de 30 minutos
 def generar_horarios():
     horarios = []
     for h in range(7, 21):
@@ -56,19 +54,15 @@ def generar_horarios():
 
 dias = generar_dias()
 horarios = generar_horarios()
-
-# Crear tabla vacía
 columnas = [d.strftime('%a %d/%m') for d in dias]
 tabla = pd.DataFrame("", index=horarios, columns=columnas)
 
-# Completar con turnos
 for t in st.session_state.turnos:
     fecha = datetime.strptime(t["fecha"], "%Y-%m-%d")
     col = fecha.strftime('%a %d/%m')
     if col in tabla.columns and t["hora"] in tabla.index:
         tabla.at[t["hora"], col] = t["nombre"]
 
-# Estilo pastel alternado por columnas
 def estilo_columnas(df):
     colores = ['#ffe6f0', '#fce4ec']
     style = pd.DataFrame("", index=df.index, columns=df.columns)
@@ -77,3 +71,56 @@ def estilo_columnas(df):
     return style
 
 st.dataframe(tabla.style.apply(estilo_columnas, axis=None), use_container_width=True)
+
+# 🔧 Edición y eliminación
+st.markdown("---")
+st.subheader("✏️ Modificar o eliminar turno")
+
+if st.session_state.turnos:
+    opciones = [f"{t['fecha']} {t['hora']} - {t['nombre']}" for t in st.session_state.turnos]
+    seleccion = st.selectbox("Seleccioná un turno", opciones)
+    index = opciones.index(seleccion)
+    turno = st.session_state.turnos[index]
+
+    with st.form("editar_turno"):
+        col1, col2 = st.columns(2)
+        with col1:
+            nuevo_nombre = st.text_input("Nombre del paciente", turno["nombre"])
+            nuevo_telefono = st.text_input("Teléfono", turno["telefono"])
+            nuevo_email = st.text_input("Correo electrónico", turno["email"])
+        with col2:
+            nuevo_tratamiento = st.text_input("Tratamiento", turno["tratamiento"])
+            nueva_fecha = st.date_input("Fecha del turno", datetime.strptime(turno["fecha"], "%Y-%m-%d"))
+            nueva_hora = st.time_input("Hora del turno", datetime.strptime(turno["hora"], "%H:%M").time())
+        nueva_obs = st.text_area("Observaciones / seguimiento", turno["observaciones"])
+
+        col_editar, col_borrar = st.columns(2)
+        actualizar = col_editar.form_submit_button("💾 Guardar cambios")
+        eliminar = col_borrar.form_submit_button("🗑️ Eliminar turno")
+
+        if actualizar:
+            st.session_state.turnos[index] = {
+                "nombre": nuevo_nombre,
+                "telefono": nuevo_telefono,
+                "email": nuevo_email,
+                "tratamiento": nuevo_tratamiento,
+                "fecha": nueva_fecha.strftime("%Y-%m-%d"),
+                "hora": nueva_hora.strftime("%H:%M"),
+                "observaciones": nueva_obs
+            }
+            st.success("✅ Turno actualizado")
+
+        if eliminar:
+            st.session_state.turnos.pop(index)
+            st.success("🗑️ Turno eliminado")
+
+# 📤 Exportar a Excel
+st.markdown("---")
+st.subheader("📁 Exportar turnos a Excel")
+
+if st.session_state.turnos:
+    df_export = pd.DataFrame(st.session_state.turnos)
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        df_export.to_excel(writer, index=False, sheet_name="Turnos")
+    st.download_button("⬇️ Descargar Excel", data=buffer.getvalue(), file_name="turnos_kinesiologia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
