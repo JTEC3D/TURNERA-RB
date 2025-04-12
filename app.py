@@ -3,17 +3,15 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 st.set_page_config(page_title='Turnera Kinesiología', layout='wide')
-
 st.title('Turnera Kinesiología 🩷')
-st.caption('Turnos de lunes a viernes (14-21 hs) y sábados (7-21 hs), cada 30 minutos.')
+st.caption('Turnos de lunes a sábado (semana actual + siguiente). Intervalos de 30 minutos.')
 
-# Inicializar session state
+# Inicializar turnos en memoria
 if 'turnos' not in st.session_state:
     st.session_state.turnos = []
 
-# ---- FORMULARIO ----
+# Formulario de carga
 st.subheader("➕ Cargar nuevo turno")
-
 with st.form("form_turno"):
     col1, col2 = st.columns(2)
     with col1:
@@ -24,12 +22,10 @@ with st.form("form_turno"):
         tratamiento = st.text_input("Tratamiento")
         fecha = st.date_input("Fecha del turno", value=datetime.today())
         hora = st.time_input("Hora del turno", value=datetime.strptime("14:00", "%H:%M").time())
+    obs = st.text_area("Observaciones / seguimiento")
+    enviar = st.form_submit_button("Guardar turno")
 
-    observaciones = st.text_area("Observaciones / seguimiento")
-
-    enviado = st.form_submit_button("Guardar turno")
-
-    if enviado and nombre and tratamiento:
+    if enviar and nombre and tratamiento:
         st.session_state.turnos.append({
             "nombre": nombre,
             "telefono": telefono,
@@ -37,62 +33,47 @@ with st.form("form_turno"):
             "tratamiento": tratamiento,
             "fecha": fecha.strftime("%Y-%m-%d"),
             "hora": hora.strftime("%H:%M"),
-            "observaciones": observaciones
+            "observaciones": obs
         })
-        st.success("✅ Turno guardado correctamente")
+        st.success("✅ Turno guardado")
 
 st.markdown("---")
+st.subheader("📅 Agenda de turnos (una sola tabla con días y horarios)")
 
-# ---- AGENDA SEMANAL ----
-st.subheader("📅 Turnos agendados (semana actual + siguiente)")
-
-def generar_agenda():
+# Generar días lunes a sábado para semana actual + siguiente
+def generar_dias():
     hoy = datetime.today()
     lunes = hoy - timedelta(days=hoy.weekday())
-    dias = [lunes + timedelta(days=i) for i in range(6 * 2)]  # lunes a sábado, 2 semanas
-    agenda = []
+    return [lunes + timedelta(days=i) for i in range(12)]  # lunes a sábado * 2 semanas
 
-    for dia in dias:
-        if dia.weekday() < 5:  # Lun a Vie
-            hs_inicio, hs_fin = 14, 21
-        else:  # Sáb
-            hs_inicio, hs_fin = 7, 21
+# Generar horarios desde 07:00 a 21:00 en intervalos de 30 minutos
+def generar_horarios():
+    horarios = []
+    for h in range(7, 21):
+        horarios.append(f"{h:02d}:00")
+        horarios.append(f"{h:02d}:30")
+    return horarios
 
-        hora_actual = hs_inicio
-        while hora_actual < hs_fin:
-            for m in [0, 30]:
-                hora_str = f"{hora_actual:02d}:{m:02d}"
-                agenda.append({
-                    "Fecha": dia.strftime("%Y-%m-%d"),
-                    "Hora": hora_str,
-                    "Paciente": ""
-                })
-            hora_actual += 1
-    return agenda
+dias = generar_dias()
+horarios = generar_horarios()
 
-# Generar agenda base
-agenda = generar_agenda()
+# Crear tabla vacía
+columnas = [d.strftime('%a %d/%m') for d in dias]
+tabla = pd.DataFrame("", index=horarios, columns=columnas)
 
-# Cargar turnos en agenda
-for turno in st.session_state.turnos:
-    for slot in agenda:
-        if slot["Fecha"] == turno["fecha"] and slot["Hora"] == turno["hora"]:
-            slot["Paciente"] = turno["nombre"]
+# Completar con turnos
+for t in st.session_state.turnos:
+    fecha = datetime.strptime(t["fecha"], "%Y-%m-%d")
+    col = fecha.strftime('%a %d/%m')
+    if col in tabla.columns and t["hora"] in tabla.index:
+        tabla.at[t["hora"], col] = t["nombre"]
 
-df_agenda = pd.DataFrame(agenda)
+# Estilo pastel alternado por columnas
+def estilo_columnas(df):
+    colores = ['#ffe6f0', '#fce4ec']
+    style = pd.DataFrame("", index=df.index, columns=df.columns)
+    for i, col in enumerate(df.columns):
+        style[col] = [f'background-color: {colores[i % 2]}; text-align: center; font-weight: bold;' for _ in df.index]
+    return style
 
-# Colorear con estilo pastel rosa
-def formato_html(row):
-    color_fondo = "#ffe6f0" if row.name % 2 == 0 else "#fce4ec"
-    texto = f"<div style='background-color:{color_fondo}; text-align:center; padding:5px; font-weight:{'bold' if row['Paciente'] else 'normal'}'>{row['Paciente'] or ''}</div>"
-    return texto
-
-df_agenda["Mostrar"] = df_agenda.apply(formato_html, axis=1)
-
-# Mostrar por días
-dias = df_agenda["Fecha"].unique()
-for fecha in dias:
-    st.markdown(f"#### {fecha}")
-    df_dia = df_agenda[df_agenda["Fecha"] == fecha][["Hora", "Mostrar"]]
-    df_dia.columns = ["Hora", "Paciente"]
-    st.write(df_dia.to_html(escape=False, index=False), unsafe_allow_html=True)
+st.dataframe(tabla.style.apply(estilo_columnas, axis=None), use_container_width=True)
